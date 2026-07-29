@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Fashion OOTD — curate and share your Outfit of the Day." />
   <meta name="theme-color" content="#1a1a1a" />
   <title>OOTD · Outfit of the Day</title>
@@ -59,10 +59,32 @@
           <span>Look title</span>
           <input type="text" name="title" required maxlength="60" placeholder="Cozy autumn layers" />
         </label>
-        <label class="field">
-          <span>Cover emoji or image URL</span>
-          <input type="text" name="cover" placeholder="🧥 or https://…" />
-        </label>
+        <div class="field">
+          <span>Cover</span>
+          <div class="cover-row">
+            <input type="text" name="cover" id="cover-input" placeholder="🧥 emoji or https://… URL" />
+            <button type="button" class="btn cam-open" id="cam-open">📷 Camera</button>
+          </div>
+
+          <div class="camera" id="camera" hidden>
+            <div class="camera-stage">
+              <video id="cam-video" playsinline autoplay muted></video>
+            </div>
+            <div class="camera-controls">
+              <button type="button" class="btn" id="cam-switch">🔄 Flip camera</button>
+              <button type="button" class="btn btn-primary" id="cam-shot">◉ Capture</button>
+              <button type="button" class="btn" id="cam-close">Close</button>
+            </div>
+            <p class="cam-error" id="cam-error" role="alert" hidden></p>
+          </div>
+
+          <div class="cover-preview" id="cover-preview" hidden>
+            <img id="cover-preview-img" alt="Captured cover preview" />
+            <button type="button" class="btn" id="cover-clear">✕ Remove photo</button>
+          </div>
+
+          <canvas id="cam-canvas" hidden></canvas>
+        </div>
         <label class="field">
           <span>Notes</span>
           <textarea name="notes" rows="3" maxlength="240" placeholder="Oversized blazer, straight jeans, white sneakers."></textarea>

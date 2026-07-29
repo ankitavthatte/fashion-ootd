@@ -39,6 +39,9 @@
   var looks = load();
   var activeFilter = "All";
   var query = "";
+  var capturedCover = null; // data URL from the camera, takes precedence over the text field
+  var stream = null;        // active MediaStream while the camera is open
+  var facing = "environment"; // "environment" = back camera, "user" = front camera
 
   // ---- Elements ----
   var feed = byId("feed");
@@ -48,6 +51,12 @@
   var searchEl = byId("search");
   var modal = byId("modal");
   var form = byId("outfit-form");
+  var camera = byId("camera");
+  var camVideo = byId("cam-video");
+  var camCanvas = byId("cam-canvas");
+  var camError = byId("cam-error");
+  var coverPreview = byId("cover-preview");
+  var coverPreviewImg = byId("cover-preview-img");
 
   // ---- Init ----
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
@@ -72,13 +81,24 @@
     render();
   });
 
+  // ---- Camera controls ----
+  byId("cam-open").addEventListener("click", openCamera);
+  byId("cam-close").addEventListener("click", stopCamera);
+  byId("cam-switch").addEventListener("click", switchCamera);
+  byId("cam-shot").addEventListener("click", capturePhoto);
+  byId("cover-clear").addEventListener("click", clearCapture);
+  // Typing a URL/emoji clears any captured photo so the two inputs never conflict.
+  byId("cover-input").addEventListener("input", function () {
+    if (this.value.trim()) clearCapture();
+  });
+
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var data = new FormData(form);
     var look = {
       id: uid(),
       title: (data.get("title") || "").trim() || "Untitled look",
-      cover: (data.get("cover") || "").trim() || pickEmoji(),
+      cover: capturedCover || (data.get("cover") || "").trim() || pickEmoji(),
       notes: (data.get("notes") || "").trim(),
       occasion: data.get("occasion") || "Casual",
       weather: data.get("weather") || "⛅ Mild",
@@ -86,9 +106,13 @@
       likes: 0, liked: false, created: Date.now()
     };
     looks.unshift(look);
-    save();
+    if (!save() && capturedCover) {
+      // Photo pushed us over the browser storage limit — keep it in this session only.
+      alert("Heads up: your browser's local storage is full, so this photo won't persist after you close the tab. Try removing a few older looks.");
+    }
     closeModal();
     form.reset();
+    clearCapture();
     activeFilter = "All"; query = ""; searchEl.value = "";
     renderFilters();
     render();
@@ -197,7 +221,7 @@
 
   function coverFor(look) {
     var cover = el("div", "card-cover");
-    if (isUrl(look.cover)) {
+    if (isImageSrc(look.cover)) {
       var img = document.createElement("img");
       img.src = look.cover;
       img.alt = look.title;
@@ -229,7 +253,95 @@
 
   // ---- Modal ----
   function openModal() { modal.hidden = false; setTimeout(function () { form.elements.title.focus(); }, 20); }
-  function closeModal() { modal.hidden = true; }
+  function closeModal() { stopCamera(); modal.hidden = true; }
+
+  // ---- Camera ----
+  function openCamera() {
+    camError.hidden = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showCamError("This browser doesn't support camera capture. You can still paste an image URL.");
+      return;
+    }
+    camera.hidden = false;
+    startStream();
+  }
+
+  function startStream() {
+    stopTracks();
+    var constraints = { audio: false, video: { facingMode: { ideal: facing } } };
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(function (s) {
+        stream = s;
+        camVideo.srcObject = s;
+        var play = camVideo.play();
+        if (play && play.catch) play.catch(function () {});
+      })
+      .catch(function (err) {
+        var name = err && err.name;
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          showCamError("Camera access was blocked. Allow camera permission in your browser and try again.");
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          showCamError("No matching camera found. Try flipping the camera.");
+        } else {
+          showCamError("Couldn't start the camera. Make sure the page is served over HTTPS and no other app is using the camera.");
+        }
+      });
+  }
+
+  function switchCamera() {
+    facing = facing === "environment" ? "user" : "environment";
+    if (!camera.hidden) startStream();
+  }
+
+  function capturePhoto() {
+    if (!stream || !camVideo.videoWidth) {
+      showCamError("Camera isn't ready yet — give it a second and try again.");
+      return;
+    }
+    // Downscale to keep the stored data URL small (localStorage is ~5MB).
+    var vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+    var scale = Math.min(1, 720 / Math.max(vw, vh));
+    camCanvas.width = Math.round(vw * scale);
+    camCanvas.height = Math.round(vh * scale);
+    var ctx = camCanvas.getContext("2d");
+    if (facing === "user") {
+      // Mirror the front camera so the capture matches the on-screen preview.
+      ctx.translate(camCanvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(camVideo, 0, 0, camCanvas.width, camCanvas.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    capturedCover = camCanvas.toDataURL("image/jpeg", 0.75);
+
+    coverPreviewImg.src = capturedCover;
+    coverPreview.hidden = false;
+    byId("cover-input").value = "";
+    stopCamera();
+  }
+
+  function clearCapture() {
+    capturedCover = null;
+    coverPreview.hidden = true;
+    coverPreviewImg.removeAttribute("src");
+  }
+
+  function stopCamera() {
+    stopTracks();
+    camera.hidden = true;
+  }
+
+  function stopTracks() {
+    if (stream) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      stream = null;
+    }
+    camVideo.srcObject = null;
+  }
+
+  function showCamError(msg) {
+    camError.textContent = msg;
+    camError.hidden = false;
+  }
 
   // ---- Theme ----
   function applyTheme(theme) {
@@ -248,14 +360,19 @@
     return SEED.slice();
   }
   function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(looks)); } catch (e) {}
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(looks));
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // ---- Helpers ----
   function byId(id) { return document.getElementById(id); }
   function el(tag, cls) { var n = document.createElement(tag); if (cls) n.className = cls; return n; }
   function badge(text) { var b = el("span", "badge"); b.textContent = text; return b; }
-  function isUrl(s) { return /^https?:\/\//i.test(s || ""); }
+  function isImageSrc(s) { return /^(https?:\/\/|data:image\/)/i.test(s || ""); }
   function parseTags(s) {
     return (s || "").split(",").map(function (t) { return t.trim().toLowerCase(); })
       .filter(Boolean).slice(0, 6);
