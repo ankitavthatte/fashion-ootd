@@ -1,24 +1,24 @@
 /* Try On — open the camera and wear the jacket.
- * The jacket tracks your shoulders in real time (MediaPipe Pose Landmarker),
- * scaling, following and rotating as you move. If the model can't load it
- * falls back to a fixed centered overlay so the app always works.
+ * The jacket is warped in real perspective onto the wearer's torso using
+ * shoulder + hip landmarks (MediaPipe Pose Landmarker), so it turns and
+ * foreshortens with the body instead of looking pasted on. Falls back to a
+ * fixed front-on fit when the pose model can't load.
  * Vanilla JS, no build step. */
 (function () {
   "use strict";
 
-  // MediaPipe Tasks Vision (loaded lazily from CDN in the browser).
   var TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20";
   var WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/wasm";
   var MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-  // Jacket art geometry (matches the SVG viewBox 320 x 340).
-  var ASPECT = 340 / 320;
-  var ANCHOR_Y = 0.25;       // vertical spot in the art that sits on the shoulder line
-  var SPAN_TO_WIDTH = 3.2;   // jacket width relative to shoulder span
-  var SMOOTH = 0.4;          // 0..1, higher = snappier / more jitter
+  // Art geometry (viewBox 320x340). Torso quad = where the body panel sits.
+  var ART_W = 320, ART_H = 340;
+  var SRC = [ { x: 100, y: 96 }, { x: 220, y: 96 }, { x: 214, y: 300 }, { x: 106, y: 300 } ]; // LS, RS, RH, LH
+  var SMOOTH = 0.4;
 
   var cam = byId("cam");
   var overlay = byId("overlay");
+  var shadow = byId("shadow");
   var jacket = byId("jacket");
   var hint = byId("hint");
   var canvas = byId("canvas");
@@ -30,19 +30,17 @@
   var saveLink = byId("save");
 
   var stream = null;
-  var facing = "user"; // "user" = front (selfie), "environment" = back
+  var facing = "user";
   var landmarker = null;
-  var tracking = false;   // pose model is available
-  var running = false;    // camera loop is active
-  var raf = 0;
-  var lastTs = 0;
-  var lostFrames = 0;
-  var state = { x: 0, y: 0, w: 0, h: 0, angle: 0, visible: false };
-  var jacketImg = new Image();
+  var tracking = false;
+  var running = false;
+  var raf = 0, lastTs = 0, lostFrames = 0;
+  var quad = null;     // current smoothed destination corners [LS,RS,RH,LH]
+  var visible = false;
 
-  // Preload the jacket art as an image for compositing into captures.
-  jacketImg.src = "data:image/svg+xml;charset=utf-8," +
-    encodeURIComponent(new XMLSerializer().serializeToString(jacket));
+  var jacketImg = new Image();
+  jacketImg.src = svgToUri(jacket);
+  var jacketTex = null, shadowTex = null;
 
   // ---- Controls ----
   byId("flip").addEventListener("click", flip);
@@ -52,33 +50,32 @@
   byId("retry-btn").addEventListener("click", function () { hide(errorScreen); openCamera(); });
   window.addEventListener("resize", function () { if (!tracking) applyFixed(); });
 
+  // Test hook: /?mocktrack lets a harness drive tracking with fake landmarks.
+  if (location.search.indexOf("mocktrack") >= 0) {
+    tracking = true;
+    window.__ootd = { feed: function (lm) { updateFromPose(lm); place(); }, capture: capture, state: function () { return { visible: visible, quad: quad }; } };
+  }
+
   // ---- Boot ----
-  initPose();     // load the tracker in the background (non-blocking)
-  openCamera();   // open the camera right away
+  initPose();
+  openCamera();
 
   // ---- Pose model ----
   function initPose() {
     import(TASKS_URL).then(function (vision) {
       return vision.FilesetResolver.forVisionTasks(WASM_URL).then(function (resolver) {
-        return createLandmarker(vision, resolver, "GPU").catch(function () {
-          return createLandmarker(vision, resolver, "CPU");
-        });
+        return make(vision, resolver, "GPU").catch(function () { return make(vision, resolver, "CPU"); });
       });
     }).then(function (lm) {
-      landmarker = lm;
-      tracking = true;
+      landmarker = lm; tracking = true;
     }).catch(function () {
-      // Offline or blocked — keep the fixed overlay fallback.
-      tracking = false;
-      applyFixed();
+      tracking = false; applyFixed();
     });
   }
-
-  function createLandmarker(vision, resolver, delegate) {
+  function make(vision, resolver, delegate) {
     return vision.PoseLandmarker.createFromOptions(resolver, {
       baseOptions: { modelAssetPath: MODEL_URL, delegate: delegate },
-      runningMode: "VIDEO",
-      numPoses: 1
+      runningMode: "VIDEO", numPoses: 1
     });
   }
 
@@ -93,129 +90,137 @@
         stream = s;
         cam.srcObject = s;
         cam.classList.toggle("mirror", facing === "user");
-        var p = cam.play();
-        if (p && p.catch) p.catch(function () {});
+        var p = cam.play(); if (p && p.catch) p.catch(function () {});
         running = true;
         if (!tracking) applyFixed();
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(loop);
       })
       .catch(function (err) {
-        var name = err && err.name;
-        if (name === "NotAllowedError" || name === "SecurityError") {
-          show(startScreen);
-        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
-          fail("No camera found on this device.");
-        } else {
-          fail("Couldn't open the camera. Make sure no other app is using it, then try again.");
-        }
+        var n = err && err.name;
+        if (n === "NotAllowedError" || n === "SecurityError") show(startScreen);
+        else if (n === "NotFoundError" || n === "OverconstrainedError") fail("No camera found on this device.");
+        else fail("Couldn't open the camera. Make sure no other app is using it, then try again.");
       });
   }
 
   function flip() {
     facing = facing === "user" ? "environment" : "user";
-    state.visible = false; // reset so the jacket snaps to the new view
+    visible = false;
     openCamera();
   }
 
   // ---- Frame loop ----
   function loop() {
-    if (running) {
-      if (tracking && landmarker && cam.videoWidth) {
-        var ts = performance.now();
-        if (ts <= lastTs) ts = lastTs + 1;
-        lastTs = ts;
-        try {
-          var res = landmarker.detectForVideo(cam, ts);
-          if (res && res.landmarks && res.landmarks[0]) updateFromPose(res.landmarks[0]);
-          else markLost();
-        } catch (e) { /* transient — skip this frame */ }
-      }
-      place();
-      raf = requestAnimationFrame(loop);
+    if (!running) return;
+    if (tracking && landmarker && cam.videoWidth) {
+      var ts = performance.now();
+      if (ts <= lastTs) ts = lastTs + 1;
+      lastTs = ts;
+      try {
+        var res = landmarker.detectForVideo(cam, ts);
+        if (res && res.landmarks && res.landmarks[0]) updateFromPose(res.landmarks[0]);
+        else markLost();
+      } catch (e) { /* skip frame */ }
     }
+    place();
+    raf = requestAnimationFrame(loop);
   }
 
   function updateFromPose(lm) {
-    var L = lm[11], R = lm[12]; // shoulders
-    if (!L || !R) return markLost();
-    if ((L.visibility !== undefined && L.visibility < 0.5) ||
-        (R.visibility !== undefined && R.visibility < 0.5)) return markLost();
+    var LS = lm[11], RS = lm[12], LH = lm[23], RH = lm[24];
+    if (!LS || !RS) return markLost();
+    if (vis(LS) < 0.5 || vis(RS) < 0.5) return markLost();
 
-    var a = toDisplay(L), b = toDisplay(R);
-    var midx = (a.x + b.x) / 2, midy = (a.y + b.y) / 2;
-    var dx = b.x - a.x, dy = b.y - a.y;
-    var span = Math.hypot(dx, dy);
+    var ls = toDisplay(LS), rs = toDisplay(RS);
+    var span = dist(ls, rs);
     if (!span) return markLost();
 
-    var ang = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-
-    var w = span * SPAN_TO_WIDTH;
-    setTarget(midx, midy, w, w * ASPECT, ang);
+    // Down axis: use hips if we can see them, else drop straight below shoulders.
+    var lh, rh;
+    if (LH && RH && vis(LH) > 0.4 && vis(RH) > 0.4) {
+      lh = toDisplay(LH); rh = toDisplay(RH);
+    } else {
+      var ex = { x: (rs.x - ls.x) / span, y: (rs.y - ls.y) / span };
+      var down = { x: -ex.y, y: ex.x };
+      if (down.y < 0) { down.x = -down.x; down.y = -down.y; }
+      var t = span * 1.6;
+      lh = { x: ls.x + down.x * t, y: ls.y + down.y * t };
+      rh = { x: rs.x + down.x * t, y: rs.y + down.y * t };
+    }
+    setTarget(fitQuad(ls, rs, lh, rh));
     lostFrames = 0;
     hint.style.display = "none";
   }
 
-  function markLost() {
-    if (++lostFrames > 18) state.visible = false;
+  // Expand shoulder/hip landmarks outward to where the jacket's seams sit.
+  function fitQuad(ls, rs, lh, rh) {
+    var span = dist(ls, rs);
+    var ex = { x: (rs.x - ls.x) / span, y: (rs.y - ls.y) / span };
+    var mid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+    var hipMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+    var ey = { x: hipMid.x - mid.x, y: hipMid.y - mid.y };
+    var tl = Math.hypot(ey.x, ey.y) || 1; ey.x /= tl; ey.y /= tl;
+    var oS = span * 0.16, up = span * 0.10, oH = span * 0.06;
+    return [
+      { x: ls.x - ex.x * oS - ey.x * up, y: ls.y - ex.y * oS - ey.y * up },
+      { x: rs.x + ex.x * oS - ey.x * up, y: rs.y + ex.y * oS - ey.y * up },
+      { x: rh.x + ex.x * oH, y: rh.y + ex.y * oH },
+      { x: lh.x - ex.x * oH, y: lh.y - ex.y * oH }
+    ];
   }
 
-  function setTarget(x, y, w, h, angle) {
-    if (!state.visible) {
-      state.x = x; state.y = y; state.w = w; state.h = h; state.angle = angle;
-    } else {
-      state.x = lerp(state.x, x, SMOOTH);
-      state.y = lerp(state.y, y, SMOOTH);
-      state.w = lerp(state.w, w, SMOOTH);
-      state.h = lerp(state.h, h, SMOOTH);
-      state.angle = lerp(state.angle, angle, SMOOTH);
+  function markLost() { if (++lostFrames > 18) visible = false; }
+
+  function setTarget(t) {
+    if (!quad || !visible) { quad = t.map(function (p) { return { x: p.x, y: p.y }; }); }
+    else for (var i = 0; i < 4; i++) {
+      quad[i].x = lerp(quad[i].x, t[i].x, SMOOTH);
+      quad[i].y = lerp(quad[i].y, t[i].y, SMOOTH);
     }
-    state.visible = true;
+    visible = true;
   }
 
-  // Fixed centered overlay when tracking isn't available.
+  // Fixed front-on fit (no tracking / model unavailable).
   function applyFixed() {
     var cw = cam.clientWidth || window.innerWidth;
     var ch = cam.clientHeight || window.innerHeight;
-    var w = Math.min(cw * 0.88, 460);
-    var h = w * ASPECT;
-    state = { x: cw / 2, y: ch * 0.14 + ANCHOR_Y * h, w: w, h: h, angle: 0, visible: true };
+    var sw = Math.min(cw * 0.22, 150);
+    var hw = sw * 0.95, ty = ch * 0.26, by = ch * 0.72, cx = cw / 2;
+    quad = [ { x: cx - sw, y: ty }, { x: cx + sw, y: ty }, { x: cx + hw, y: by }, { x: cx - hw, y: by } ];
+    visible = true;
     place();
+  }
+
+  // ---- Placement (perspective) ----
+  function place() {
+    var on = visible && quad;
+    overlay.style.opacity = on ? 0.97 : 0;
+    shadow.style.opacity = on ? 0.4 : 0;
+    if (!on) return;
+    var H = homography(SRC, quad);
+    if (!H) return;
+    var m = matrix3d(H);
+    overlay.style.transform = m;
+    shadow.style.transform = m;
   }
 
   // Map a normalized landmark to on-screen pixels (object-fit: cover + mirror).
   function toDisplay(pt) {
-    var cw = cam.clientWidth, ch = cam.clientHeight;
-    var vw = cam.videoWidth, vh = cam.videoHeight;
+    var cw = cam.clientWidth, ch = cam.clientHeight, vw = cam.videoWidth, vh = cam.videoHeight;
     var scale = Math.max(cw / vw, ch / vh);
-    var sx = (vw - cw / scale) / 2;
-    var sy = (vh - ch / scale) / 2;
-    var dx = (pt.x * vw - sx) * scale;
-    var dy = (pt.y * vh - sy) * scale;
-    if (facing === "user") dx = cw - dx; // mirror to match the flipped preview
+    var dx = (pt.x * vw - (vw - cw / scale) / 2) * scale;
+    var dy = (pt.y * vh - (vh - ch / scale) / 2) * scale;
+    if (facing === "user") dx = cw - dx;
     return { x: dx, y: dy };
   }
 
-  function place() {
-    overlay.style.opacity = state.visible ? 0.96 : 0;
-    if (!state.visible) return;
-    overlay.style.width = state.w + "px";
-    overlay.style.left = state.x + "px";
-    overlay.style.top = state.y + "px";
-    overlay.style.transformOrigin = "50% " + (ANCHOR_Y * 100) + "%";
-    overlay.style.transform =
-      "translate(-50%, -" + (ANCHOR_Y * 100) + "%) rotate(" + state.angle + "deg)";
-  }
-
-  // ---- Capture ----
+  // ---- Capture (replicate the perspective with a triangle mesh) ----
   function capture() {
     if (!stream || !cam.videoWidth) return;
-    running = false;
-    cancelAnimationFrame(raf);
+    running = false; cancelAnimationFrame(raf);
 
-    var cw = cam.clientWidth, ch = cam.clientHeight;
-    var vw = cam.videoWidth, vh = cam.videoHeight;
+    var cw = cam.clientWidth, ch = cam.clientHeight, vw = cam.videoWidth, vh = cam.videoHeight;
     canvas.width = cw; canvas.height = ch;
     var ctx = canvas.getContext("2d");
 
@@ -227,38 +232,133 @@
     ctx.drawImage(cam, sx, sy, visW, visH, 0, 0, cw, ch);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    if (state.visible && jacketImg.complete) {
-      var h = state.w * ASPECT;
-      ctx.save();
-      ctx.translate(state.x, state.y);
-      ctx.rotate(state.angle * Math.PI / 180);
-      ctx.globalAlpha = 0.96;
-      ctx.drawImage(jacketImg, -state.w / 2, -ANCHOR_Y * h, state.w, h);
-      ctx.restore();
+    if (visible && quad) {
+      buildTextures();
+      var H = homography(SRC, quad);
+      if (H) {
+        try {
+          ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.4;
+          warp(ctx, shadowTex, H);
+          ctx.restore();
+          ctx.save(); ctx.globalAlpha = 0.97;
+          warp(ctx, jacketTex, H);
+          ctx.restore();
+        } catch (e) { /* keep the plain photo if compositing fails */ }
+      }
     }
 
     var url = canvas.toDataURL("image/jpeg", 0.92);
-    photo.src = url;
-    saveLink.href = url;
+    photo.src = url; saveLink.href = url;
     show(resultScreen);
     stopTracks();
   }
 
+  function buildTextures() {
+    if (jacketTex || !jacketImg.complete || !jacketImg.naturalWidth) {
+      if (!jacketTex && jacketImg.complete && !jacketImg.naturalWidth) rasterFallback();
+      if (jacketTex) return;
+    }
+    var w = 640, h = 680;
+    jacketTex = raster(w, h, function (c) { c.drawImage(jacketImg, 0, 0, w, h); });
+    shadowTex = raster(w, h, function (c) {
+      c.filter = "blur(10px)";
+      c.drawImage(jacketImg, 0, 0, w, h);
+      c.filter = "none";
+      c.globalCompositeOperation = "source-in";
+      c.fillStyle = "#000";
+      c.fillRect(0, 0, w, h);
+    });
+  }
+  function rasterFallback() { /* SVG failed to decode; leave textures null */ }
+  function raster(w, h, draw) {
+    var c = document.createElement("canvas"); c.width = w; c.height = h;
+    var g = c.getContext("2d"); draw(g); return c;
+  }
+
+  // Draw a texture through homography H by subdividing into a triangle mesh.
+  function warp(ctx, tex, H) {
+    var N = 10, tw = tex.width / ART_W, th = tex.height / ART_H;
+    for (var i = 0; i < N; i++) {
+      for (var j = 0; j < N; j++) {
+        var ax0 = i / N * ART_W, ax1 = (i + 1) / N * ART_W;
+        var ay0 = j / N * ART_H, ay1 = (j + 1) / N * ART_H;
+        var A = { x: ax0, y: ay0 }, B = { x: ax1, y: ay0 }, C = { x: ax1, y: ay1 }, D = { x: ax0, y: ay1 };
+        var sA = { x: ax0 * tw, y: ay0 * th }, sB = { x: ax1 * tw, y: ay0 * th };
+        var sC = { x: ax1 * tw, y: ay1 * th }, sD = { x: ax0 * tw, y: ay1 * th };
+        tri(ctx, tex, sA, sB, sC, applyH(H, A), applyH(H, B), applyH(H, C));
+        tri(ctx, tex, sA, sC, sD, applyH(H, A), applyH(H, C), applyH(H, D));
+      }
+    }
+  }
+  function tri(ctx, tex, s0, s1, s2, d0, d1, d2) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(d0.x, d0.y); ctx.lineTo(d1.x, d1.y); ctx.lineTo(d2.x, d2.y); ctx.closePath();
+    ctx.clip();
+    // Affine mapping from source triangle to destination triangle.
+    var denom = s0.x * (s2.y - s1.y) - s1.x * s2.y + s2.x * s1.y + (s1.x - s2.x) * s0.y;
+    if (denom === 0) { ctx.restore(); return; }
+    var a = -(s0.y * (d2.x - d1.x) - s1.y * d2.x + s2.y * d1.x + (s1.y - s2.y) * d0.x) / denom;
+    var b = (s1.y * d2.y + s0.y * (d1.y - d2.y) - s2.y * d1.y + (s2.y - s1.y) * d0.y) / denom;
+    var c = (s0.x * (d2.x - d1.x) - s1.x * d2.x + s2.x * d1.x + (s1.x - s2.x) * d0.x) / denom;
+    var d = -(s1.x * d2.y + s0.x * (d1.y - d2.y) - s2.x * d1.y + (s2.x - s1.x) * d0.y) / denom;
+    var e = (s0.x * (s2.y * d1.x - s1.y * d2.x) + s0.y * (s1.x * d2.x - s2.x * d1.x) + (s2.x * s1.y - s1.x * s2.y) * d0.x) / denom;
+    var f = (s0.x * (s2.y * d1.y - s1.y * d2.y) + s0.y * (s1.x * d2.y - s2.x * d1.y) + (s2.x * s1.y - s1.x * s2.y) * d0.y) / denom;
+    ctx.transform(a, b, c, d, e, f);
+    ctx.drawImage(tex, 0, 0);
+    ctx.restore();
+  }
+
+  // ---- Homography (maps src[4] -> dst[4]); returns h0..h7 (h8 = 1) ----
+  function homography(src, dst) {
+    var A = [], y = [];
+    for (var i = 0; i < 4; i++) {
+      var s = src[i], d = dst[i];
+      A.push([s.x, s.y, 1, 0, 0, 0, -d.x * s.x, -d.x * s.y]); y.push(d.x);
+      A.push([0, 0, 0, s.x, s.y, 1, -d.y * s.x, -d.y * s.y]); y.push(d.y);
+    }
+    return solve(A, y, 8);
+  }
+  function solve(A, y, n) {
+    for (var col = 0; col < n; col++) {
+      var piv = col;
+      for (var r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+      if (Math.abs(A[piv][col]) < 1e-9) return null;
+      var tA = A[col]; A[col] = A[piv]; A[piv] = tA;
+      var ty = y[col]; y[col] = y[piv]; y[piv] = ty;
+      for (var r2 = 0; r2 < n; r2++) {
+        if (r2 === col) continue;
+        var f = A[r2][col] / A[col][col];
+        for (var c2 = col; c2 < n; c2++) A[r2][c2] -= f * A[col][c2];
+        y[r2] -= f * y[col];
+      }
+    }
+    var h = [];
+    for (var k = 0; k < n; k++) h[k] = y[k] / A[k][k];
+    return h;
+  }
+  function applyH(h, p) {
+    var w = h[6] * p.x + h[7] * p.y + 1;
+    return { x: (h[0] * p.x + h[1] * p.y + h[2]) / w, y: (h[3] * p.x + h[4] * p.y + h[5]) / w };
+  }
+  function matrix3d(h) {
+    return "matrix3d(" + [h[0], h[3], 0, h[6], h[1], h[4], 0, h[7], 0, 0, 1, 0, h[2], h[5], 0, 1].join(",") + ")";
+  }
+
   function retake() {
-    hide(resultScreen);
-    photo.removeAttribute("src");
-    state.visible = false;
-    openCamera();
+    hide(resultScreen); photo.removeAttribute("src"); visible = false; openCamera();
   }
 
   // ---- Helpers ----
-  function fail(msg) { running = false; errorMsg.textContent = msg; show(errorScreen); }
+  function fail(m) { running = false; errorMsg.textContent = m; show(errorScreen); }
   function stopTracks() {
-    running = false;
-    cancelAnimationFrame(raf);
+    running = false; cancelAnimationFrame(raf);
     if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
     cam.srcObject = null;
   }
+  function svgToUri(el) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(el)); }
+  function vis(p) { return p.visibility === undefined ? 1 : p.visibility; }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function show(el) { el.hidden = false; }
   function hide(el) { el.hidden = true; }
