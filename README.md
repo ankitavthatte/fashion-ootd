@@ -1,46 +1,42 @@
-# 👗 OOTD — Outfit of the Day
+# 🧥 Try On — OOTD
 
-A lightweight web app for logging, tagging, and revisiting your daily outfits. Build a personal lookbook you'll actually come back to.
+Dead-simple virtual try-on. Open the page, the camera opens, and the jacket is
+already on you. Line up your shoulders, tap the shutter, save the photo.
 
-**Live demo:** deployed to GitHub Pages via GitHub Actions (see below).
+**Live:** https://ankitavthatte.github.io/fashion-ootd/
 
-## Features
+## How it works
 
-- **Add looks** — title, cover (emoji or image URL), notes, occasion, weather, and tags
-- **Browse & search** — filter by occasion or search across titles, notes, and tags
-- **Like** your favorite looks and see running stats
-- **Local-first** — everything is saved in your browser's `localStorage`; no account, no server
-- **Light / dark theme** with a one-click toggle
-- **Zero dependencies, no build step** — plain HTML, CSS, and JavaScript
+- Camera opens automatically (front camera by default, so you see yourself)
+- A jacket overlay sits on top of the live camera — nothing to choose or set up
+- 🔄 flips between the front and back camera
+- ◉ takes the photo (the jacket is baked into the saved image)
+- Save the shot or retake
+
+No accounts, no uploads — everything happens on your device. Camera access
+needs **HTTPS** (GitHub Pages qualifies) or `localhost`.
 
 ## Run locally
 
-It's a static site, so any static server works:
+Static site — any static server works:
 
 ```bash
-# Python
-python3 -m http.server 8000
-
-# or Node
-npx serve .
+python3 -m http.server 8000   # then open http://localhost:8000
 ```
-
-Then open <http://localhost:8000>.
 
 ## Project structure
 
 ```
-index.html   # markup + modal
-styles.css   # theme tokens, layout, components
-app.js       # state, rendering, persistence
+index.html   # camera + jacket overlay + controls
+styles.css   # full-screen camera UI
+app.js       # camera, flip, capture/compositing
 .github/workflows/deploy.yml  # GitHub Pages deployment
 ```
 
-## Deployment
+## Swapping the jacket
 
-Pushing to the default branch runs the **Deploy to GitHub Pages** workflow, which
-publishes the site. To enable it once: repository **Settings → Pages → Build and
-deployment → Source: GitHub Actions**.
+The jacket is an inline SVG in `index.html` (`#jacket`). Replace that SVG — or
+swap it for an `<img>` with a transparent PNG — to change the garment.
 
 ## License
 

@@ -2,127 +2,92 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="description" content="Fashion OOTD — curate and share your Outfit of the Day." />
-  <meta name="theme-color" content="#1a1a1a" />
-  <title>OOTD · Outfit of the Day</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%97%3C/text%3E%3C/svg%3E" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Try the jacket on — just open the camera and wear it." />
+  <meta name="theme-color" content="#000000" />
+  <title>Try On · OOTD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%A5%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="site-header">
-    <div class="wrap header-inner">
-      <a class="brand" href="#" aria-label="OOTD home">
-        <span class="brand-mark">👗</span>
-        <span class="brand-name">OOTD</span>
-      </a>
-      <div class="header-actions">
-        <div class="search">
-          <input type="search" id="search" placeholder="Search styles, tags, occasions…" aria-label="Search outfits" />
-        </div>
-        <button class="btn btn-primary" id="open-add" type="button">+ New Outfit</button>
-        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme">🌙</button>
+  <main id="app">
+    <!-- Live camera -->
+    <video id="cam" playsinline autoplay muted></video>
+
+    <!-- The jacket sits on top of the camera. Move so it lines up with your shoulders. -->
+    <div id="overlay">
+      <svg id="jacket" viewBox="0 0 320 340" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" aria-label="Jacket">
+        <defs>
+          <linearGradient id="denim" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#5b86c9" />
+            <stop offset="1" stop-color="#375a97" />
+          </linearGradient>
+          <linearGradient id="denimDark" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3f6099" />
+            <stop offset="1" stop-color="#294470" />
+          </linearGradient>
+        </defs>
+        <g stroke="#1d3253" stroke-width="2.5" stroke-linejoin="round">
+          <path d="M92 78 L36 96 L60 250 L112 236 L108 120 Z" fill="url(#denimDark)" />
+          <path d="M228 78 L284 96 L260 250 L208 236 L212 120 Z" fill="url(#denimDark)" />
+          <path d="M108 70 L160 96 L212 70 L214 300 L160 312 L106 300 Z" fill="url(#denim)" />
+          <path d="M108 70 L160 96 L132 132 L100 104 Z" fill="url(#denimDark)" />
+          <path d="M212 70 L160 96 L188 132 L220 104 Z" fill="url(#denimDark)" />
+        </g>
+        <line x1="160" y1="96" x2="160" y2="300" stroke="#1d3253" stroke-width="2.5" />
+        <g fill="none" stroke="#1d3253" stroke-width="2.5" stroke-linejoin="round">
+          <path d="M120 150 h30 v26 h-30 z" />
+          <path d="M170 150 h30 v26 h-30 z" />
+        </g>
+        <g fill="#e0c97e" stroke="#8a7326" stroke-width="1">
+          <circle cx="160" cy="150" r="5" />
+          <circle cx="160" cy="188" r="5" />
+          <circle cx="160" cy="226" r="5" />
+          <circle cx="160" cy="264" r="5" />
+          <circle cx="135" cy="176" r="3" />
+          <circle cx="185" cy="176" r="3" />
+        </g>
+      </svg>
+    </div>
+
+    <!-- Gentle hint, fades on its own -->
+    <p id="hint">Line up your shoulders with the jacket</p>
+
+    <!-- Live controls -->
+    <div id="controls">
+      <button id="flip" class="ctl" type="button" aria-label="Flip camera">🔄</button>
+      <button id="shot" class="shutter" type="button" aria-label="Take photo"><span></span></button>
+      <span class="ctl-spacer" aria-hidden="true"></span>
+    </div>
+
+    <!-- Tap-to-start fallback (shown only if the camera can't auto-open) -->
+    <div id="start" class="screen" hidden>
+      <div class="screen-inner">
+        <div class="screen-emoji">🧥</div>
+        <button id="start-btn" class="big-btn" type="button">Tap to open camera</button>
       </div>
     </div>
-  </header>
 
-  <main class="wrap">
-    <section class="hero">
-      <h1>Your Outfit of the Day, curated.</h1>
-      <p>Log what you wore, tag the vibe, and build a lookbook you'll actually revisit.</p>
-    </section>
+    <!-- Error screen -->
+    <div id="error" class="screen" hidden>
+      <div class="screen-inner">
+        <div class="screen-emoji">📷</div>
+        <p id="error-msg"></p>
+        <button id="retry-btn" class="big-btn" type="button">Try again</button>
+      </div>
+    </div>
 
-    <nav class="filters" id="filters" aria-label="Filter by occasion"></nav>
+    <!-- Result after capture -->
+    <div id="result" class="screen" hidden>
+      <img id="photo" alt="Your try-on photo" />
+      <div id="result-actions">
+        <button id="retake" class="big-btn ghost" type="button">↺ Retake</button>
+        <a id="save" class="big-btn" download="my-ootd.jpg">⬇ Save photo</a>
+      </div>
+    </div>
 
-    <section class="stats" id="stats" aria-live="polite"></section>
-
-    <section class="grid" id="feed" aria-live="polite"></section>
-
-    <p class="empty" id="empty" hidden>No outfits match your search. Try another tag or add a new look.</p>
+    <canvas id="canvas" hidden></canvas>
   </main>
-
-  <footer class="site-footer">
-    <div class="wrap">
-      <p>Built with 🧵 — your looks are stored locally in your browser.</p>
-    </div>
-  </footer>
-
-  <!-- Add / Edit outfit dialog -->
-  <div class="modal-backdrop" id="modal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-head">
-        <h2 id="modal-title">New Outfit</h2>
-        <button class="icon-btn" id="close-add" type="button" aria-label="Close">✕</button>
-      </div>
-      <form id="outfit-form" class="form">
-        <label class="field">
-          <span>Look title</span>
-          <input type="text" name="title" required maxlength="60" placeholder="Cozy autumn layers" />
-        </label>
-        <div class="field">
-          <span>Cover</span>
-          <div class="cover-row">
-            <input type="text" name="cover" id="cover-input" placeholder="🧥 emoji or https://… URL" />
-            <button type="button" class="btn cam-open" id="cam-open">📷 Camera</button>
-          </div>
-
-          <div class="camera" id="camera" hidden>
-            <div class="camera-stage">
-              <video id="cam-video" playsinline autoplay muted></video>
-            </div>
-            <div class="camera-controls">
-              <button type="button" class="btn" id="cam-switch">🔄 Flip camera</button>
-              <button type="button" class="btn btn-primary" id="cam-shot">◉ Capture</button>
-              <button type="button" class="btn" id="cam-close">Close</button>
-            </div>
-            <p class="cam-error" id="cam-error" role="alert" hidden></p>
-          </div>
-
-          <div class="cover-preview" id="cover-preview" hidden>
-            <img id="cover-preview-img" alt="Captured cover preview" />
-            <button type="button" class="btn" id="cover-clear">✕ Remove photo</button>
-          </div>
-
-          <canvas id="cam-canvas" hidden></canvas>
-        </div>
-        <label class="field">
-          <span>Notes</span>
-          <textarea name="notes" rows="3" maxlength="240" placeholder="Oversized blazer, straight jeans, white sneakers."></textarea>
-        </label>
-        <div class="field-row">
-          <label class="field">
-            <span>Occasion</span>
-            <select name="occasion">
-              <option>Casual</option>
-              <option>Work</option>
-              <option>Date</option>
-              <option>Party</option>
-              <option>Athleisure</option>
-              <option>Formal</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Weather</span>
-            <select name="weather">
-              <option>☀️ Sunny</option>
-              <option>⛅ Mild</option>
-              <option>🌧️ Rainy</option>
-              <option>❄️ Cold</option>
-              <option>🔥 Hot</option>
-            </select>
-          </label>
-        </div>
-        <label class="field">
-          <span>Tags (comma separated)</span>
-          <input type="text" name="tags" placeholder="minimal, neutral, denim" />
-        </label>
-        <div class="form-actions">
-          <button type="button" class="btn" id="cancel-add">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save look</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <script src="app.js"></script>
 </body>
