@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>3D Try-On (8th Wall) · OOTD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%A5%3C/text%3E%3C/svg%3E" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #fff;
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif; }
+    a-scene { width: 100vw; height: 100vh; }
+    /* Setup card shown until an 8th Wall App Key + model are configured */
+    #setup { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { max-width: 460px; background: #17130f; border: 1px solid #362c24; border-radius: 18px; padding: 26px; }
+    .card h1 { margin: 0 0 6px; font-size: 20px; }
+    .card p { color: #b3a498; font-size: 14px; line-height: 1.5; }
+    .card ol { color: #d8ccc2; font-size: 14px; line-height: 1.7; padding-left: 18px; }
+    .card code { background: #2c241d; padding: 1px 6px; border-radius: 6px; font-size: 12px; }
+    .badge { display: inline-block; background: #c14953; color: #fff; font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 999px; letter-spacing: .5px; margin-bottom: 12px; }
+    a { color: #e0757f; }
+  </style>
+</head>
+<body>
+  <!-- ============================================================
+       CONFIG — fill these two in, then this page goes live.
+       1) appKey: from your 8th Wall project (Settings → App Key)
+       2) model:  path/URL to your 3D jacket (.glb)
+       ============================================================ -->
+  <script>
+    window.OOTD_CONFIG = {
+      appKey: "YOUR_8THWALL_APP_KEY",
+      model: "jacket.glb",
+      // Fitting knobs (tune on-device):
+      distance: 1.6,   // metres in front of the camera the garment sits
+      scale: 1.0,      // overall garment scale multiplier
+      yOffset: 0.0     // nudge up/down to sit on the shoulders
+    };
+  </script>
+
+  <!-- Setup card (removed automatically once configured) -->
+  <div id="setup">
+    <div class="card">
+      <span class="badge">SETUP NEEDED</span>
+      <h1>🧥 3D Try-On — 8th Wall</h1>
+      <p>This is a starter scaffold. To make it live:</p>
+      <ol>
+        <li>Create a project at <a href="https://www.8thwall.com" target="_blank" rel="noopener">8thwall.com</a> and copy its <b>App Key</b>.</li>
+        <li>Add this page's domain to the project's <b>authorized domains</b>.</li>
+        <li>Drop a 3D jacket <code>jacket.glb</code> next to this file (or set a URL).</li>
+        <li>Edit <code>window.OOTD_CONFIG</code> at the top of this file with your App Key + model path.</li>
+      </ol>
+      <p>Then reload on your phone. See the README (“3D try-on on 8th Wall”) for the full walkthrough.</p>
+    </div>
+  </div>
+
+  <!-- The AR scene + engine are injected by the bootstrap below only when configured,
+       so unconfigured visitors just see the setup card instead of a broken camera. -->
+  <script src="body-fit.js"></script>
+  <script>
+    (function () {
+      var cfg = window.OOTD_CONFIG || {};
+      var ready = cfg.appKey && cfg.appKey !== "YOUR_8THWALL_APP_KEY";
+      if (!ready) return; // leave the setup card up
+
+      document.getElementById("setup").remove();
+
+      // A-Frame (Three.js scene graph 8th Wall renders into)
+      addScript("https://aframe.io/releases/1.5.0/aframe.min.js", function () {
+        // 8th Wall Web engine, keyed to your project
+        addScript("//apps.8thwall.com/xrweb?appKey=" + encodeURIComponent(cfg.appKey), function () {
+          var scene = document.createElement("a-scene");
+          scene.setAttribute("xrweb", "");
+          scene.setAttribute("renderer", "colorManagement: true; physicallyCorrectLights: true");
+          scene.innerHTML =
+            '<a-assets><a-asset-item id="garment-model" src="' + cfg.model + '"></a-asset-item></a-assets>' +
+            '<a-light type="ambient" intensity="0.8"></a-light>' +
+            '<a-light type="directional" intensity="1.1" position="1 2 1"></a-light>' +
+            '<a-camera position="0 0 0" cursor="rayOrigin: mouse"></a-camera>' +
+            '<a-entity id="garment" gltf-model="#garment-model" body-fit visible="false"></a-entity>';
+          document.body.appendChild(scene);
+        });
+      });
+
+      function addScript(src, cb) {
+        var s = document.createElement("script");
+        s.src = src; s.async = false; s.onload = cb; document.head.appendChild(s);
+      }
+    })();
+  </script>
+</body>
+</html>
