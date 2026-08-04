@@ -73,7 +73,14 @@ export function buildPuffer(env) {
   const g = new THREE.Group();
   const mat = nylon(0xf3a200);
   const cuffMat = new THREE.MeshPhysicalMaterial({ color: 0x17181c, roughness: 0.6, clearcoat: 0.3 });
-  mat.envMap = env; cuffMat.envMap = env;
+  // Translucent green collar — glossy but see-through.
+  const collarMat = new THREE.MeshPhysicalMaterial({
+    color: 0x3fd98a, metalness: 0.0, roughness: 0.12,
+    clearcoat: 1.0, clearcoatRoughness: 0.04, envMapIntensity: 2.2,
+    transparent: true, opacity: 0.42, transmission: 0.55,
+    thickness: 0.4, ior: 1.35, side: THREE.DoubleSide,
+  });
+  mat.envMap = env; cuffMat.envMap = env; collarMat.envMap = env;
 
   // BODY: revolved quilted barrel, flattened on Z to an oval torso. Boxy and
   // wide (oversized) with only gentle taper near the very top and hem.
@@ -86,10 +93,10 @@ export function buildPuffer(env) {
   body.scale.z = 0.62;
   g.add(body);
 
-  // COLLAR: fat oval torus standing up around the neck.
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.15, 20, 40), mat);
+  // COLLAR: smaller translucent-green stand collar around the neck.
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.10, 18, 36), collarMat);
   collar.rotation.x = Math.PI / 2 - 0.35;
-  collar.position.y = 0.60; collar.scale.set(1, 1, 0.7);
+  collar.position.y = 0.54; collar.scale.set(1, 1, 0.7);
   g.add(collar);
 
   // SLEEVES: bent quilted tubes hanging down from each shoulder.
