@@ -39,30 +39,33 @@ app.js       # camera, pose tracking, flip, capture/compositing
 .github/workflows/deploy.yml  # GitHub Pages deployment
 ```
 
-## 3D try-on on 8th Wall (experimental scaffold)
+## True 3D try-on (`tryon-3d.html`)
 
-`tryon-8thwall.html` + `body-fit.js` are a **starter** for a true 3D, body-wrapping
-try-on using [8th Wall](https://www.8thwall.com) WebAR. The main try-on page
-above is unaffected. 8th Wall provides the hosted AR camera and a Three.js
-scene; `body-fit.js` adds the missing piece — it runs MediaPipe Pose Landmarker
-on the camera and fits a 3D garment (`.glb`) to your shoulders/hips, with a
-metallic PBR material for the shiny "inflated" look.
+`tryon-3d.html` is a **real 3D** try-on: a glossy puffer built as actual
+Three.js geometry that wraps onto your body and turns/scales in perspective as
+you move — not a flat image. It's self-contained and free (no accounts, no
+paid platform): [Three.js](https://threejs.org) loads from a CDN, the same
+MediaPipe Pose Landmarker drives the fit, and the garment + its studio
+lighting are generated in code (`puffer3d.js`) so there's no model file to
+ship. Reach it from the `3D ›` link on the main page, or open it directly.
 
-To make it live:
+- The garment is a procedural quilted puffer with a glossy nylon PBR material
+  and an environment map, so it reads as shiny/wet and three-dimensional.
+- Fit knobs live at the top of `tryon-3d.html` (`DIST`, `OVERSIZE`, `DROP`) —
+  tune them on-device for how the jacket sits.
 
-1. Create a project at [8thwall.com](https://www.8thwall.com), copy its **App Key**,
-   and add your site's domain to the project's authorized domains.
-2. Add a 3D jacket model `jacket.glb` next to `tryon-8thwall.html` (Sketchfab has
-   free downloadable ones), or point `model` at a URL.
-3. Edit `window.OOTD_CONFIG` at the top of `tryon-8thwall.html` with your App Key
-   and model path. Tune `distance` / `scale` / `yOffset` on-device.
-4. Open `tryon-8thwall.html` on your phone.
+Honest caveats: depth from a single phone camera is approximate, so the fit is
+best-effort (some sliding on fast motion); reflections come from a built-in
+studio environment, not your real room; and the model faces the camera and
+rolls with your shoulders but doesn't yaw as you turn.
 
-Notes / honest caveats:
-- 8th Wall is a **paid** platform, and body-garment fitting is not one of its
-  built-in trackers — hence the MediaPipe integration in `body-fit.js`.
-- Depth from a single camera is approximate, so the fit needs tuning; for a
-  richer look, swap the procedural environment in `body-fit.js` for a real HDRI.
+### 8th Wall scaffold (optional, paid)
+
+`tryon-8thwall.html` + `body-fit.js` remain as an alternative starter for
+[8th Wall](https://www.8thwall.com) WebAR (hosted AR camera + a `.glb` model).
+It needs a paid 8th Wall App Key and a jacket model, and 8th Wall doesn't do
+garment fitting itself — `body-fit.js` adds that via MediaPipe. The free
+`tryon-3d.html` above supersedes it for most uses.
 
 ## Swapping the jacket
 

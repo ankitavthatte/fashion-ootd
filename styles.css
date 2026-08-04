@@ -51,6 +51,26 @@ body {
   filter: blur(9px);
 }
 
+/* Link between the 2D and 3D try-on pages */
+.mode-link {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.mode-link:active { background: rgba(0, 0, 0, 0.6); }
+
 /* Hint */
 #hint {
   position: absolute;
